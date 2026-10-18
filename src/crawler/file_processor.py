@@ -3,16 +3,34 @@
 from __future__ import annotations
 
 import io
+import logging
 from pathlib import Path
 
 import fitz
 from docx import Document as DocxDocument
 from pptx import Presentation
 
+logger = logging.getLogger(__name__)
+
+_OCR_MIN_CHARS = 20
+
 
 def _read_pdf(file_bytes: bytes) -> str:
+    pages: list[str] = []
     with fitz.open(stream=file_bytes, filetype="pdf") as pdf:
-        return "\n\n".join(page.get_text("text") for page in pdf)
+        for page in pdf:
+            text = page.get_text("text").strip()
+            if len(text) < _OCR_MIN_CHARS:
+                try:
+                    tp = page.get_textpage_ocr(full=True)
+                    text = page.get_text("text", textpage=tp).strip()
+                    if text:
+                        logger.info("OCR fallback extracted %d chars on page %d", len(text), page.number)
+                except RuntimeError:
+                    logger.warning("OCR unavailable (Tesseract not installed?), skipping page %d", page.number)
+            if text:
+                pages.append(text)
+    return "\n\n".join(pages)
 
 
 def _read_docx(file_bytes: bytes) -> str:
